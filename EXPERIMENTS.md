@@ -3,6 +3,8 @@
 ## STATUS (read first after a restart)
 - Best safe version: see the latest "v2" commit on `main` (`git log -1 main`). v1 = 86667138e43726fd6eef617e690b0e8abcafb67d.
 - Tuning: `python tools/tune.py '{}' '{"key":val}'` (about 30 s per 3 variants, restartable; no long background runs).
+- Time guard (v2.1): startup speed calibration + live slowdown EMA; budget 3.5 s soft / 6.0 s hard (estimated judge charge).
+  `python tools/slowcpu.py 3` simulates a 3x slower CPU.
 - Next planned step: build a stronger range-aware sparring bot (snapshot v2 as opponents/v2) and tune
   call/raise vs aggressive equity bots; preflop 3-bet ranges; verify think time on slower CPU (taskpolicy / cpulimit).
 
@@ -29,3 +31,5 @@ bb/deal is per paired deal; CI is 95%.
 
 Negative / neutral findings: bluff_freq 0.4, preflop steals, re-raise bluffs: no gain vs this panel (opponents mostly call). eps 0.03-0.15 and n_samples 400 vs 700: within noise.
 Bandit meta-policy: per-hand std is about 20 bb, so within 1,000 hands UCB cannot separate profiles that differ by < 2 bb/hand. Using direct opponent-model adjustments instead.
+| v2.1 | random (HTTP judge, seeds 31/32, laptop load avg 12) | 1000 x2 | +7.10 ± 1.28 / +7.17 ± 1.32 | WIN | 1.85/1.74, 1.71/1.87 s | 0 | before guard fix the same runs spiked to 4.73 s and 3.64 s per half under CPU contention |
+| v2.1 | slowcpu sim (always_pot) factor 1 / 3 | 1000 | n/a | | est. 2.2 s / 3.7 s | 0 | n drops to 60 when slow |

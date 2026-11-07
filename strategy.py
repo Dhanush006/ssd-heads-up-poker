@@ -347,3 +347,21 @@ def _warmup() -> None:
 
 
 _warmup()
+
+
+def _calibrate() -> float:
+    """Machine speed relative to the dev laptop (1.0 = same, 2.0 = twice as slow)."""
+    try:
+        rng = np.random.default_rng(1)
+        times = []
+        for _ in range(9):
+            t = time.perf_counter()
+            equity([30, 31, 32, 33, 34], [0, 5, 10], 200, 0.5, 0.5, rng)
+            times.append(time.perf_counter() - t)
+        times.sort()
+        return min(10.0, max(0.5, times[len(times) // 2] / 0.00060))
+    except Exception:
+        return 2.0
+
+
+SPEED = _calibrate()

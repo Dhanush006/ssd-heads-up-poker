@@ -52,11 +52,11 @@ except Exception:  # pragma: no cover
     _strategy = None
 
 # Per-half think-time budget (judge's bank is 8 s; plumbing also costs time).
-_SOFT_BUDGET = 4.0   # target charged seconds per half (spread over the hands)
-_HARD_BUDGET = 6.5   # above this, cheap rules only for the rest of the half
-_OVERHEAD = 0.0004   # estimated per-request plumbing cost (JSON, routing)
+_SOFT_BUDGET = 3.5   # target charged seconds per half (spread over the hands)
+_HARD_BUDGET = 6.0   # above this, cheap rules only for the rest of the half
+_OVERHEAD = 0.0006   # est. per-request cost outside choose_action (JSON, HTTP), scaled by machine speed
 _N_BASE = 700        # Monte Carlo samples per decision when time allows
-_N_MIN = 120
+_N_MIN = 60
 _PARAMS = None       # strategy parameter override (None = strategy.DEFAULT_PARAMS)
 
 
@@ -91,6 +91,7 @@ def new_half(config: AgentConfig, memory: dict) -> None:
     memory["think"] = 0.0
     memory["charged"] = 0.0
     memory["n"] = _N_BASE
+    memory["slow"] = 1.0
     memory["errors"] = 0
 
 
@@ -128,7 +129,13 @@ def choose_action(obs: Observation, memory: dict) -> Action:
         action = _safe_action(obs)
     dt = _time.perf_counter() - t0
     memory["think"] = memory.get("think", 0.0) + dt
-    memory["charged"] = memory.get("charged", 0.0) + max(0.0, dt + _OVERHEAD - 0.001)
+    speed = getattr(_strategy, "SPEED", 2.0) if _strategy is not None else 2.0
+    # live slowdown (CPU contention): actual vs expected decision time at this n
+    n_used = memory.get("n", _N_BASE)
+    expected = (0.00012 + 0.0000013 * n_used) * speed
+    slow = 0.9 * memory.get("slow", 1.0) + 0.1 * min(10.0, max(0.5, dt / expected))
+    memory["slow"] = slow
+    memory["charged"] = memory.get("charged", 0.0) + max(0.0, dt + _OVERHEAD * speed * max(1.0, slow) - 0.001)
     return action
 
 
