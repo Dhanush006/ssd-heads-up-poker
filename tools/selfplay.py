@@ -18,6 +18,8 @@ _counter = itertools.count()
 def load(spec):
     path, _, params = spec.partition("@")
     p = os.path.join(ROOT, path) if not os.path.isabs(path) else path
+    if os.path.dirname(p) not in sys.path:
+        sys.path.insert(0, os.path.dirname(p))
     name = f"bot_{next(_counter)}_{os.getpid()}"
     sp = importlib.util.spec_from_file_location(name, p)
     mod = importlib.util.module_from_spec(sp)
