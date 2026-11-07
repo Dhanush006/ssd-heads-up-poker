@@ -1,5 +1,11 @@
 # Experiments log
 
+## STATUS (read first after a restart)
+- Best safe version: see the latest "v2" commit on `main` (`git log -1 main`). v1 = 86667138e43726fd6eef617e690b0e8abcafb67d.
+- Tuning: `python tools/tune.py '{}' '{"key":val}'` (about 30 s per 3 variants, restartable; no long background runs).
+- Next planned step: build a stronger range-aware sparring bot (snapshot v2 as opponents/v2) and tune
+  call/raise vs aggressive equity bots; preflop 3-bet ranges; verify think time on slower CPU (taskpolicy / cpulimit).
+
 Harness: `tools/selfplay.py` (in-process duplicate matches, same pairing/CI as the judge).
 Judge rows use `judge_engine.py` over HTTP (charged think time = what the tournament counts).
 bb/deal is per paired deal; CI is 95%.
@@ -16,3 +22,10 @@ bb/deal is per paired deal; CI is 95%.
 | v1 | opponents/tight_passive | 4x500 | +1.36 ± 0.31 | WIN | | 0 | smallest edge: nit folds to bets |
 | v1 | opponents/lag | 4x500 | +7.83 ± 0.74 | WIN | | 0 | |
 | v1 | opponents/station_plus | 4x500 | +6.55 ± 0.54 | WIN | | 0 | |
+| v2 | panel mean (7 opps, 2x400 selfplay) | 5600 | +7.67 (was +6.45 for v1) | | | 0 | thinner value bets (bet_half ~0.50-0.54), raise_eq 0.56-0.72, maniac trap (+0.10 raise_eq when opp raise freq > 0.55), bluff 0.1, own-action tracking bug fixed |
+| v2 | opponents/v1 | 8x500 | +0.73 ± ~0.6 | WIN (pooled) | | 0 | head-to-head vs previous version |
+| v2 | always_pot (HTTP judge, seed 21) | 1000 | +7.94 ± 1.59 | WIN | 0.71 s / 0.65 s | 0 | |
+| v2 | calling_station (HTTP judge, seed 22) | 1000 | +10.87 ± 0.96 | WIN | 0.30 s / 0.40 s | 0 | |
+
+Negative / neutral findings: bluff_freq 0.4, preflop steals, re-raise bluffs: no gain vs this panel (opponents mostly call). eps 0.03-0.15 and n_samples 400 vs 700: within noise.
+Bandit meta-policy: per-hand std is about 20 bb, so within 1,000 hands UCB cannot separate profiles that differ by < 2 bb/hand. Using direct opponent-model adjustments instead.

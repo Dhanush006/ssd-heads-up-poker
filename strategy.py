@@ -115,14 +115,21 @@ def equity(hole, board, n, q_pre=1.0, q_post=1.0, rng=None, eps=0.08):
 # ---------------------------------------------------------------------------
 DEFAULT_PARAMS = {
     # value raise thresholds by street (equity vs range)
-    "raise_eq": [0.60, 0.68, 0.72, 0.75],
+    "raise_eq": [0.56, 0.64, 0.68, 0.72],
     # bet thresholds when checked to (half / pot)
-    "bet_half": [0.56, 0.58, 0.60, 0.62],
-    "bet_pot": [0.62, 0.68, 0.72, 0.76],
+    "bet_half": [0.50, 0.51, 0.52, 0.54],
+    "bet_pot": [0.55, 0.60, 0.63, 0.66],
     # extra equity needed above pot odds to call
     "call_margin": [0.0, 0.03, 0.03, 0.02],
     # semi-bluff when checked to
-    "bluff_freq": 0.25,
+    "bluff_freq": 0.1,
+    "maniac_adj": 0.10,
+    "maniac_agg": 0.55,
+    "bluff_fr0": 0.30,     # fold rate at which bluffing starts
+    "bluff_cap": 2.5,
+    "reraise_bluff": 0.0,
+    "steal_freq": 0.0,
+    "steal_lo": 0.35,
     "bluff_lo": 0.30,
     "bluff_hi": 0.52,
     # opponent model
@@ -146,6 +153,9 @@ def new_model() -> dict:
         "opp_raise": [0, 0, 0, 0],     # opp raises per street
         "faced": 0,                    # times opp responded to our raise
         "fold_to_raise": 0,            # ...and folded
+        "faced_s": [0, 0, 0, 0],       # same, per street of our raise
+        "fold_s": [0, 0, 0, 0],
+        "my_raise_street": 0,
         "sd_raise_n": [0, 0],          # showdowns where opp raised [pre, post]
         "sd_raise_pct": [0.0, 0.0],    # sum of their strength percentile
         "hand": -1,                    # current hand index
@@ -170,12 +180,15 @@ def _process_history(m: dict, obs) -> None:
         s = int(a.street)
         if a.is_me:
             m["last_was_my_raise"] = int(a.action) >= RAISE_HALF
+            m["my_raise_street"] = s
             continue
         m["opp_act"][s] += 1
         if m["last_was_my_raise"]:
             m["faced"] += 1
+            m["faced_s"][m["my_raise_street"]] += 1
             if int(a.action) == FOLD:
                 m["fold_to_raise"] += 1
+                m["fold_s"][m["my_raise_street"]] += 1
         if int(a.action) >= RAISE_HALF:
             m["opp_raise"][s] += 1
             m["opp_raised_streets"][s] += 1
@@ -187,11 +200,15 @@ def on_result(m: dict, result) -> None:
     """Update the model from a finished hand."""
     if result.hand_index == m["hand"]:
         # Opponent folded to our last raise (not visible in our history).
+        rs = m["my_raise_street"]
         if not result.went_to_showdown and result.my_net > 0 and m["last_was_my_raise"]:
             m["faced"] += 1
             m["fold_to_raise"] += 1
+            m["faced_s"][rs] += 1
+            m["fold_s"][rs] += 1
         elif m["last_was_my_raise"] and result.went_to_showdown:
             m["faced"] += 1  # they called our final raise
+            m["faced_s"][rs] += 1
         if result.went_to_showdown and result.opp_hole is not None:
             ors = m["opp_raised_streets"]
             if ors[0]:
@@ -228,9 +245,14 @@ def _raise_q(m: dict, street: int, P: dict) -> float:
     return min(1.0, max(P["q_min"], q))
 
 
-def fold_rate(m: dict, P: dict) -> float:
+def fold_rate(m: dict, P: dict, street: int | None = None) -> float:
+    """Opponent's fold-to-our-raise rate; per street shrinks to the overall rate."""
     pn = P["prior_n"]
-    return (m["fold_to_raise"] + P["prior_fold"] * pn) / (m["faced"] + pn)
+    overall = (m["fold_to_raise"] + P["prior_fold"] * pn) / (m["faced"] + pn)
+    if street is None:
+        return overall
+    k = 8.0
+    return (m["fold_s"][street] + overall * k) / (m["faced_s"][street] + k)
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +264,14 @@ def decide(obs, m: dict, P: dict | None = None, n_override: int | None = None):
     if P is None:
         P = DEFAULT_PARAMS
     _process_history(m, obs)
+    act = _decide(obs, m, P, n_override)
+    # remember our own action now: if it ends the hand we never see it in history
+    m["last_was_my_raise"] = act >= RAISE_HALF
+    m["my_raise_street"] = int(obs.street)
+    return act
+
+
+def _decide(obs, m: dict, P: dict, n_override):
     legal = [int(a) for a in obs.legal_actions]
     street = int(obs.street)
     hole = list(obs.hole_cards)
@@ -271,18 +301,27 @@ def decide(obs, m: dict, P: dict | None = None, n_override: int | None = None):
     to_call = obs.to_call
     pot = obs.pot
     can_raise = RAISE_POT in legal
-    fr = fold_rate(m, P)
+    fr = fold_rate(m, P, street)
     u = rng.random()
+    # bluff intensity: 0 vs stations, grows with how often they fold to raises
+    bscale = min(P["bluff_cap"], max(0.0, (fr - P["bluff_fr0"]) / 0.2))
 
     if to_call > 0:
         price = to_call / (pot + to_call)
-        if can_raise and eq >= P["raise_eq"][street]:
+        pn = P["prior_n"]
+        agg = (m["opp_raise"][street] + P["prior_raise"] * pn) / (m["opp_act"][street] + pn)
+        r_eq = P["raise_eq"][street] + (P["maniac_adj"] if agg > P["maniac_agg"] else 0.0)
+        if can_raise and eq >= r_eq:
             return RAISE_POT
         if eq >= price + P["call_margin"][street]:
             return CHECK_CALL
         # occasional bluff-raise against folders (postflop only)
-        if can_raise and street >= FLOP and fr > 0.5 and u < (fr - 0.5) * 0.6 and eq > 0.25:
+        if can_raise and street >= FLOP and eq > 0.25 and u < P["reraise_bluff"] * max(0.0, fr - 0.5):
             return RAISE_POT
+        # preflop: SB completing the blind is cheap; steal instead vs folders
+        if street == PREFLOP and can_raise and obs.raises_this_street == 0 and eq >= P["steal_lo"] \
+                and u < P["steal_freq"] * bscale:
+            return RAISE_HALF
         return FOLD if FOLD in legal else CHECK_CALL
 
     # checked to us / free option
@@ -291,10 +330,12 @@ def decide(obs, m: dict, P: dict | None = None, n_override: int | None = None):
             return RAISE_POT
         if eq >= P["bet_half"][street]:
             return RAISE_HALF
-        if street >= FLOP and P["bluff_lo"] <= eq <= P["bluff_hi"]:
-            bf = P["bluff_freq"] * min(2.0, fr / 0.35)
-            if u < bf:
-                return RAISE_HALF if fr < 0.45 else RAISE_POT
+        if street >= FLOP and eq <= P["bluff_hi"] and (eq >= P["bluff_lo"] or fr > 0.55):
+            if u < P["bluff_freq"] * bscale:
+                return RAISE_HALF if fr < 0.6 else RAISE_POT
+        # preflop steal vs folders (first in from the small blind, or BB option)
+        if street == PREFLOP and eq >= P["steal_lo"] and u < P["steal_freq"] * bscale:
+            return RAISE_HALF
     return CHECK_CALL
 
 
