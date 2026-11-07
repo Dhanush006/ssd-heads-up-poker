@@ -1,7 +1,7 @@
 # Experiments log
 
 ## STATUS (read first after a restart)
-- Best safe version: see the latest "v2" commit on `main` (`git log -1 main`). v1 = 86667138e43726fd6eef617e690b0e8abcafb67d.
+- Best safe version: v2.1 = f41e047965bfc9526d9e8ff600093bff6363abe1 (code). Always `git log -1 main`; main is kept submittable. v1 = 59b1f90.
 - Tuning: `python tools/tune.py '{}' '{"key":val}'` (about 30 s per 3 variants, restartable; no long background runs).
 - Time guard (v2.1): startup speed calibration + live slowdown EMA; budget 3.5 s soft / 6.0 s hard (estimated judge charge).
   `python tools/slowcpu.py 3` simulates a 3x slower CPU.
