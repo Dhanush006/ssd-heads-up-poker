@@ -33,3 +33,18 @@ Negative / neutral findings: bluff_freq 0.4, preflop steals, re-raise bluffs: no
 Bandit meta-policy: per-hand std is about 20 bb, so within 1,000 hands UCB cannot separate profiles that differ by < 2 bb/hand. Using direct opponent-model adjustments instead.
 | v2.1 | random (HTTP judge, seeds 31/32, laptop load avg 12) | 1000 x2 | +7.10 ± 1.28 / +7.17 ± 1.32 | WIN | 1.85/1.74, 1.71/1.87 s | 0 | before guard fix the same runs spiked to 4.73 s and 3.64 s per half under CPU contention |
 | v2.1 | slowcpu sim (always_pot) factor 1 / 3 | 1000 | n/a | | est. 2.2 s / 3.7 s | 0 | n drops to 60 when slow |
+
+## Phase 3 (branch phase3) - aggressive/adaptive sparring panel
+New opponents: opponents/lag3bet.py (light 3-bets), opponents/river_bluffer.py, opponents/exploiter.py (adapts to our fold rate), opponents/v2 (snapshot of submitted v2.1). Panel = 11 opponents, 4 seeds x 500 paired deals per opponent.
+
+| Candidate | Panel mean | vs v2 | Worst opponent | Verdict |
+|---|---|---|---|---|
+| v2 (seeds 1-4) | +6.04 | 0 | tight_passive +1.34 ± 0.34 | baseline; aggressive bots: lag3bet +4.16, river_bluffer +5.47, exploiter +4.63 (all WIN) |
+| pre_reraise_add [-0.02,0,0.03,0.06] | +6.17 | +0.14 ± 0.17 | | within noise |
+| pre_reraise_add [0,0.02,0.05,0.08] / [0.03,0,0,0] | +6.10 / +5.95 | ~0 | | no gain |
+| pos_call 0.02 / pos_bet ±0.02 | +5.94 / +6.04 / +5.97 | ~0 | | no gain |
+| call_pow 0.5 / 1.0 (narrow range after opp calls) | +5.86 / +5.78 | ~0 | | worse: too cautious |
+| seeds 5-8: v2 / n=1200 / eps 0.05 / eps 0.05 + reraise | +5.53 / +5.53 / +5.49 / +5.60 | -0.04 / +0.19 / -0.14 | | within noise |
+
+Verdict: plateau. No candidate clearly beats v2, so main stays at the submitted v2.1 (c94d9f4). New parameters are kept but off by default (behaviour identical to v2). 0 errors in every run; in-process think time <= 2.6 s per half with 8 matches running in parallel.
+Next ideas if time allows: opponent-specific preflop ranges from showdown data, multi-street planning (bet sizing by SPR), river bluff-catching calibrated by observed river bluff rate.

@@ -124,6 +124,10 @@ DEFAULT_PARAMS = {
     # semi-bluff when checked to
     "bluff_freq": 0.1,
     "maniac_adj": 0.10,
+    "pre_reraise_add": [0.0, 0.0, 0.0, 0.0],   # preflop raise threshold add by raises so far
+    "pos_call": 0.0,                           # in-position postflop call discount
+    "pos_bet": 0.0,
+    "call_pow": 0.0,                           # >0: narrow range after opp calls our raise                            # in-position postflop bet discount
     "maniac_agg": 0.55,
     "bluff_fr0": 0.30,     # fold rate at which bluffing starts
     "bluff_cap": 2.5,
@@ -161,6 +165,7 @@ def new_model() -> dict:
         "hand": -1,                    # current hand index
         "seen": 0,                     # history entries already processed
         "opp_raised_streets": [0, 0, 0, 0],
+        "opp_called_streets": [0, 0, 0, 0],
         "last_was_my_raise": False,
         "think": 0.0,                  # seconds spent in choose_action
         "calls": 0,
@@ -173,6 +178,7 @@ def _process_history(m: dict, obs) -> None:
         m["hand"] = obs.hand_index
         m["seen"] = 0
         m["opp_raised_streets"] = [0, 0, 0, 0]
+        m["opp_called_streets"] = [0, 0, 0, 0]
         m["last_was_my_raise"] = False
         m["my_hole"] = tuple(obs.hole_cards)
     hist = obs.action_history
@@ -192,6 +198,8 @@ def _process_history(m: dict, obs) -> None:
         if int(a.action) >= RAISE_HALF:
             m["opp_raise"][s] += 1
             m["opp_raised_streets"][s] += 1
+        elif m["last_was_my_raise"] and int(a.action) == CHECK_CALL:
+            m["opp_called_streets"][s] += 1
         m["last_was_my_raise"] = False
     m["seen"] = len(hist)
 
@@ -287,6 +295,15 @@ def _decide(obs, m: dict, P: dict, n_override):
     for s in (FLOP, TURN, RIVER):
         if ors[s] and s <= street:
             q_post *= _raise_q(m, s, P) ** (1.0 + 0.5 * (ors[s] - 1))
+    # opponent called our raise: their range is the part that did not fold
+    if P["call_pow"] > 0:
+        occ = m["opp_called_streets"]
+        if occ[0] and not ors[0]:
+            q_pre *= max(0.3, 1.0 - fold_rate(m, P, PREFLOP)) ** P["call_pow"]
+        for s in (FLOP, TURN, RIVER):
+            if occ[s] and s <= street:
+                q_post *= max(0.3, 1.0 - fold_rate(m, P, s)) ** P["call_pow"]
+    q_pre = max(P["q_min"], q_pre)
     q_post = max(P["q_min"], q_post)
 
     n = n_override if n_override is not None else P["n_samples"]
@@ -311,9 +328,13 @@ def _decide(obs, m: dict, P: dict, n_override):
         pn = P["prior_n"]
         agg = (m["opp_raise"][street] + P["prior_raise"] * pn) / (m["opp_act"][street] + pn)
         r_eq = P["raise_eq"][street] + (P["maniac_adj"] if agg > P["maniac_agg"] else 0.0)
+        if street == PREFLOP:
+            rc = min(3, obs.raises_this_street)
+            r_eq += P["pre_reraise_add"][rc]
         if can_raise and eq >= r_eq:
             return RAISE_POT
-        if eq >= price + P["call_margin"][street]:
+        ip = obs.is_button and street >= FLOP
+        if eq >= price + P["call_margin"][street] - (P["pos_call"] if ip else 0.0):
             return CHECK_CALL
         # occasional bluff-raise against folders (postflop only)
         if can_raise and street >= FLOP and eq > 0.25 and u < P["reraise_bluff"] * max(0.0, fr - 0.5):
@@ -326,9 +347,10 @@ def _decide(obs, m: dict, P: dict, n_override):
 
     # checked to us / free option
     if can_raise:
-        if eq >= P["bet_pot"][street]:
+        pa = P["pos_bet"] if (obs.is_button and street >= FLOP) else 0.0
+        if eq >= P["bet_pot"][street] - pa:
             return RAISE_POT
-        if eq >= P["bet_half"][street]:
+        if eq >= P["bet_half"][street] - pa:
             return RAISE_HALF
         if street >= FLOP and eq <= P["bluff_hi"] and (eq >= P["bluff_lo"] or fr > 0.55):
             if u < P["bluff_freq"] * bscale:
