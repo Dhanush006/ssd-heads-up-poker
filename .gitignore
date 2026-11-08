@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+/tmp/
+results/
+__pycache__/
+*.pyc
+.venv/
+C?AUDE.md
+AGENTS.md
+.c?aude/
+docs/s?perpowers/
+docs/plans/
+PLAN.md
+TASKS.md
+data/opp_dataset*.npz

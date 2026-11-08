@@ -1,0 +1,3 @@
+{"styles": {"normal": {}, "nit": {},
+            "aggressive": {"rz_k": 1.0, "ev_margin": 0.05}},
+ "tuning": "seeds 2101-2102, sandbox vs real bots: aggressive profile +0.83 bb/deal over EV v3 on 6 aggressive bots; call_bias/trap no extra gain; nit fold_mult lost value"}
